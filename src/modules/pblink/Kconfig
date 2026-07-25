@@ -1,0 +1,5 @@
+config MODULES_PBLINK
+	bool "pblink"
+	default n
+	help
+    		This module is a uORB to Protobuf link bridge.

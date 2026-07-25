@@ -1,0 +1,89 @@
+module_name: pblink
+maintainer: Hüseyin Karakaya <github.com/karakayahuseyin>
+description: >
+  Bidirectional uORB-Protobuf link for companion computer communication.
+  Supports UART (serial) and UDP transport modes.
+type: middleware
+supported_releases:
+  - v1.17
+platforms:
+  - posix
+  - nuttx
+group: communication
+depends:
+  - uorb
+  - uorb_ucdr
+  - topic_bridge_files
+includes:
+  - $(PX4_BINARY_DIR)/platforms/common/uORB
+  - $(PX4_SRC_DIR)/modules/uorb
+
+serial_config:
+    - command: |
+        if param compare PBLINK_EN 1
+        then
+            if [ $SERIAL_DEV != ethernet ]; then
+                pblink start -d ${SERIAL_DEV} -b p:${BAUD_PARAM}
+            else
+                pblink start -t udp -u p:PBLINK_PORT -h p:PBLINK_RMT_IP
+            fi
+        fi
+      port_config_param:
+        name: PBLINK_CFG
+        group: Pblink
+      supports_networking: true
+
+parameters:
+    - group: Pblink
+      definitions:
+        PBLINK_EN:
+            description:
+                short: Enable Pblink
+                long: |
+                    Enable or disable the Pblink module.
+                    When disabled, the module will not start automatically.
+                    Set to 1 to enable, 0 to disable.
+
+            type: boolean
+            default: 1
+            reboot_required: true
+
+        PBLINK_CFG:
+            description:
+                short: Pblink port configuration
+                long: |
+                    Serial port or transport mode configuration for Pblink.
+                    0: Disabled, 1000: UDP/Ethernet mode.
+            type: int32
+            default: 1000
+            reboot_required: true
+
+        PBLINK_PORT:
+            description:
+                short: UDP port for Pblink
+                long: |
+                    UDP port when in UDP mode.
+                    PX4 listens on this port, companion connects to port+1.
+
+                    Only applicable when UDP mode is selected and the target
+                    provides UDP socket support.
+
+            type: int32
+            min: 1024
+            max: 65535
+            default: 14556
+            reboot_required: true
+            requires_ethernet: true
+
+        PBLINK_RMT_IP:
+            description:
+                short: Pblink remote IP address
+                long: |
+                    Companion computer IP address used in UDP mode.
+                    The value is stored in the same int32 IPv4 format used by
+                    UXRCE_DDS_AG_IP.
+
+            type: int32
+            default: 2130706433
+            reboot_required: true
+            requires_ethernet: true

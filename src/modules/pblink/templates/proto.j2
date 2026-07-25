@@ -1,0 +1,19 @@
+{#
+# Jinja2 template for generating a .proto file from a PX4 .msg file.
+#}
+syntax = "proto3";
+
+import "nanopb.proto";
+
+package {{ package_name }};
+
+message {{ message_name }} {
+{% for field in fields if field.is_supported -%}
+{%- if field.is_array and field.type == 'char' -%}
+    {# char arrays are strings, not repeated bytes #}
+    string {{ field.name }} = {{ loop.index }} [(nanopb).max_size = {{ field.array_size }}];
+{% else -%}
+    {{ "repeated " if field.is_array else "" }}{{ field.type | uorb_to_proto_type }} {{ field.name }} = {{ loop.index }}{{ " [(nanopb).max_count = " ~ field.array_size ~ ", (nanopb).fixed_count = true]" if field.is_array else "" }};
+{% endif -%}
+{% endfor %}
+}

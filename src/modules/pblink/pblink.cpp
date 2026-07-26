@@ -664,6 +664,52 @@ void PBLink::_handle_received_frame(uint8_t msg_type, const uint8_t *payload, si
 		return;
 	}
 
+	if (msg_type == static_cast<uint8_t>(ProtoMsgType::TOPIC_LIST_REQUEST)) {
+		px4_pblink_msgs_TopicListRequest proto_msg = px4_pblink_msgs_TopicListRequest_init_default;
+		pb_istream_t stream = pb_istream_from_buffer(payload, len);
+
+		if (pb_decode(&stream, px4_pblink_msgs_TopicListRequest_fields, &proto_msg)) {
+			px4_pblink_msgs_TopicListResponse resp = px4_pblink_msgs_TopicListResponse_init_default;
+			resp.timestamp = hrt_absolute_time();
+			resp.request_id = proto_msg.request_id;
+
+			struct EncodeState {
+				const char **topic_names;
+				const uint32_t *msg_type_ids;
+				const PBLink::RateLimiter *rate_limiters;
+				size_t count;
+			} state{UPLINK_TOPIC_NAMES, UPLINK_MSG_TYPE_IDS, _uplink_rate_limiters, UPLINK_TOPICS_COUNT};
+
+			resp.topics.funcs.encode = [](pb_ostream_t *os, const pb_field_t *field, void * const *arg) -> bool {
+				auto *st = static_cast<EncodeState *>(*arg);
+				for (size_t i = 0; i < st->count; i++) {
+					if (!pb_encode_tag_for_field(os, field)) {
+						return false;
+					}
+					px4_pblink_msgs_TopicEntry entry = px4_pblink_msgs_TopicEntry_init_default;
+					entry.msg_type_id = st->msg_type_ids[i];
+					uint32_t interval_us = st->rate_limiters[i].get_interval();
+					entry.current_rate_hz = (interval_us > 0) ? static_cast<uint32_t>(1e6f / interval_us) : 0;
+					pblink_copy_string(entry.msg_name, sizeof(entry.msg_name), st->topic_names[i], strlen(st->topic_names[i]) + 1);
+
+					if (!pb_encode_submessage(os, px4_pblink_msgs_TopicEntry_fields, &entry)) {
+						return false;
+					}
+				}
+				return true;
+			};
+			resp.topics.arg = &state;
+
+			uint8_t buffer[2048];
+			pb_ostream_t ostream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+			if (pb_encode(&ostream, px4_pblink_msgs_TopicListResponse_fields, &resp)) {
+				_send_proto_frame(ProtoMsgType::TOPIC_LIST_RESPONSE, buffer, ostream.bytes_written);
+			}
+		}
+
+		return;
+	}
+
 	PBLINK_HANDLE_DOWNLINK_SWITCH
 }
 

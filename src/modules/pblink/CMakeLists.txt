@@ -6,13 +6,13 @@ file(MAKE_DIRECTORY ${GENERATED_DIR})
 set(TEMPLATE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/templates)
 
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-	${CMAKE_CURRENT_SOURCE_DIR}/pblink-proto/topics.yaml
+	${CMAKE_CURRENT_SOURCE_DIR}/proto/topics.yaml
 )
 
 execute_process(
 	COMMAND
-		${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/proto_generator.py
-		--yaml-file ${CMAKE_CURRENT_SOURCE_DIR}/pblink-proto/topics.yaml
+		${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_cpp.py
+		--yaml-file ${CMAKE_CURRENT_SOURCE_DIR}/proto/topics.yaml
 		--list-topics
 	OUTPUT_VARIABLE PBLINK_TOPIC_LIST
 	OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -44,15 +44,15 @@ add_custom_command(
 		${GENERATED_DIR}/pblink_uplink.h
 		${PROTO_FILES}
 	COMMAND
-		${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/proto_generator.py
-		--yaml-file ${CMAKE_CURRENT_SOURCE_DIR}/pblink-proto/topics.yaml
+		${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_cpp.py
+		--yaml-file ${CMAKE_CURRENT_SOURCE_DIR}/proto/topics.yaml
 		--msg-dir ${PX4_SOURCE_DIR}/msg
 		--template-dir ${TEMPLATE_DIR}
 		--proto-dir ${PROTO_DIR}
 		--generated-dir ${GENERATED_DIR}
 	DEPENDS
-		${CMAKE_CURRENT_SOURCE_DIR}/proto_generator.py
-		${CMAKE_CURRENT_SOURCE_DIR}/pblink-proto/topics.yaml
+		${CMAKE_CURRENT_SOURCE_DIR}/generate_cpp.py
+		${CMAKE_CURRENT_SOURCE_DIR}/proto/topics.yaml
 		${TEMPLATE_DIR}/proto.j2
 		${TEMPLATE_DIR}/converter_h.j2
 		${TEMPLATE_DIR}/converter_cpp.j2

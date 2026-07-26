@@ -32,6 +32,18 @@ static const char *UPLINK_TOPIC_NAMES[{{ uplink_topics|length }}] = {
 {% endfor -%}
 };
 
+static const size_t DOWNLINK_TOPICS_COUNT = {{ downlink_topics|length }};
+static const char *DOWNLINK_TOPIC_NAMES[{{ downlink_topics|length }}] = {
+{% for topic in downlink_topics -%}
+	"{{ topic.name }}",
+{% endfor -%}
+};
+static const uint32_t DOWNLINK_MSG_TYPE_IDS[{{ downlink_topics|length }}] = {
+{% for topic in downlink_topics -%}
+	{{ "0x%02X"|format(topic.msg_type_id) }},
+{% endfor -%}
+};
+
 #define PBLINK_DOWNLINK_PUBLICATIONS \
 {% set filtered_downlink = downlink_topics | selectattr('internal', 'equalto', false) | list -%}
 {% for topic in filtered_downlink -%}

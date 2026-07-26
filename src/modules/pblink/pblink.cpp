@@ -122,6 +122,10 @@ ModuleBase::Descriptor PBLink::desc{task_spawn, custom_command, print_usage};
 
 int PBLink::custom_command(int argc, char *argv[])
 {
+	if (argc >= 1 && (strcmp(argv[0], "topics") == 0 || strcmp(argv[0], "list") == 0)) {
+		return print_topics();
+	}
+
 	return print_usage("unknown command");
 }
 
@@ -880,43 +884,42 @@ void PBLink::_update_stats()
 	}
 }
 
-void PBLink::_print_topic_stats()
+void PBLink::parameters_update(bool force) {}
+
+int PBLink::print_topics()
 {
+	PX4_INFO("Supported uORB Telemetry & Control Topics:");
 	PX4_INFO("");
-	PX4_INFO("Topic Statistics:");
-	PX4_INFO("  %-30s %8s %10s %10s %10s", "Topic", "Sent", "Rate (Hz)", "Expected", "State");
+	PX4_INFO("  %-6s %-10s %-10s %-12s %-30s", "ID", "Direction", "Rate (Hz)", "Interval us", "Name");
+	PX4_INFO("  -------------------------------------------------------------------------");
 
 	for (size_t i = 0; i < UPLINK_TOPICS_COUNT; i++) {
-		const auto &stats = _topic_stats[i];
-		uint32_t interval_us = _uplink_rate_limiters[i].get_interval();
-		float expected_hz = (interval_us > 0) ? (1e6f / interval_us) : 0.0f;
-
-		if (stats.send_count > 0 && stats.first_send > 0) {
-			float duration_sec = (stats.last_send - stats.first_send) / 1e6f;
-			float actual_hz = 0.0f;
-
-			if (duration_sec > 1.0f) {
-				actual_hz = stats.send_count / duration_sec;
-			}
-
-			PX4_INFO("  %-30s %8" PRIu32 " %10.2f %10.2f %10s",
-			         UPLINK_TOPIC_NAMES[i],
-			         stats.send_count,
-			         (double)actual_hz,
-			         (double)expected_hz,
-			         interval_us > 0 ? "active" : "disabled");
-		} else {
-			PX4_INFO("  %-30s %8s %10s %10.2f %10s",
-			         UPLINK_TOPIC_NAMES[i],
-			         "no data",
-			         "-",
-			         (double)expected_hz,
-			         interval_us > 0 ? "no data" : "disabled");
-		}
+		uint32_t interval_us = UPLINK_RATE_INTERVALS_US[i];
+		float rate_hz = (interval_us > 0) ? (1e6f / interval_us) : 0.0f;
+		PX4_INFO("  0x%02" PRIX32 "   %-10s %-10.1f %-12" PRIu32 " %-30s",
+		         UPLINK_MSG_TYPE_IDS[i],
+		         "Uplink",
+		         (double)rate_hz,
+		         interval_us,
+		         UPLINK_TOPIC_NAMES[i]);
 	}
-}
 
-void PBLink::parameters_update(bool force) {}
+	for (size_t i = 0; i < DOWNLINK_TOPICS_COUNT; i++) {
+		PX4_INFO("  0x%02" PRIX32 "   %-10s %-10s %-12s %-30s",
+		         DOWNLINK_MSG_TYPE_IDS[i],
+		         "Downlink",
+		         "RPC/Event",
+		         "-",
+		         DOWNLINK_TOPIC_NAMES[i]);
+	}
+
+	PX4_INFO("");
+	PX4_INFO("Total Topics: %zu (Uplink: %zu, Downlink: %zu)",
+	         UPLINK_TOPICS_COUNT + DOWNLINK_TOPICS_COUNT,
+	         UPLINK_TOPICS_COUNT, DOWNLINK_TOPICS_COUNT);
+
+	return 0;
+}
 
 int PBLink::print_usage(const char *reason)
 {
@@ -931,6 +934,7 @@ int PBLink::print_usage(const char *reason)
 	PRINT_MODULE_USAGE_PARAM_INT('u', 14556, 1024, 65535, "UDP local port (can also be p:<param_name>)", true);
 	PRINT_MODULE_USAGE_COMMAND("stop");
 	PRINT_MODULE_USAGE_COMMAND("status");
+	PRINT_MODULE_USAGE_COMMAND_DESCR("topics", "List all supported uORB topics, IDs, and rates");
 	return 0;
 }
 

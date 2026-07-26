@@ -50,6 +50,7 @@ public:
 	static int task_spawn(int argc, char *argv[]);
 	static PBLink *instantiate(int argc, char *argv[]);
 	static int custom_command(int argc, char *argv[]);
+	static int print_topics();
 	static int print_usage(const char *reason = nullptr);
 
 	void run() override;
@@ -147,8 +148,6 @@ private:
 		hrt_abstime last_send{0};
 	};
 	TopicStats _topic_stats[UPLINK_TOPICS_COUNT];
-
-	void _print_topic_stats();
 
 	px4_pollfd_struct_t _uplink_fds[UPLINK_POLL_TOPICS_COUNT] {};
 	PBLINK_DOWNLINK_PUBLICATIONS

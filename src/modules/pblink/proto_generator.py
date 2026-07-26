@@ -85,6 +85,31 @@ def process_topic(topic, msg_dir, proto_template, package_name, proto_dir, yaml_
     topic_name_snake = topic['name']
     topic_name_camel = snake_to_camel(topic_name_snake)
 
+    custom_proto_path = os.path.join(os.path.dirname(yaml_file_path), "proto", f"{topic_name_snake}.proto")
+    if os.path.exists(custom_proto_path):
+        import shutil
+        proto_output_path = os.path.join(proto_dir, f"{topic_name_snake}.proto")
+        shutil.copyfile(custom_proto_path, proto_output_path)
+        custom_options_path = os.path.join(os.path.dirname(yaml_file_path), "proto", f"{topic_name_snake}.options")
+        if os.path.exists(custom_options_path):
+            options_output_path = os.path.join(proto_dir, f"{topic_name_snake}.options")
+            shutil.copyfile(custom_options_path, options_output_path)
+            print(f"Copied custom options {custom_options_path} -> {options_output_path}")
+
+        rate_hz = topic.get('rate_hz', 0)
+        interval_us = int(1e6 / rate_hz) if rate_hz > 0 else 0
+        return {
+            'name': topic_name_snake,
+            'name_pascal': topic_name_camel,
+            'name_upper': topic_name_snake.upper(),
+            'fields': [],
+            'msg_type_id': topic.get('msg_type_id', 0),
+            'rate_hz': rate_hz,
+            'interval_us': interval_us,
+            'description': topic.get('description', ''),
+            'internal': topic.get('internal', False)
+        }
+
     if 'msg_file' in topic:
         explicit_filename = topic['msg_file']
         possible_paths = [

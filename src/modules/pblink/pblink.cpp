@@ -804,7 +804,6 @@ void PBLink::run()
 
 		_process_incoming_data();
 		_update_stats();
-		_send_topic_list();
 	}
 
 	PBLINK_CLOSE_UPLINK_SUBSCRIPTIONS(_uplink_fds);
@@ -869,43 +868,6 @@ void PBLink::_print_topic_stats()
 			         (double)expected_hz,
 			         interval_us > 0 ? "no data" : "disabled");
 		}
-	}
-}
-
-void PBLink::_send_topic_list()
-{
-	hrt_abstime now = hrt_absolute_time();
-
-	if (_topic_info_next_index == 0) {
-		if (_last_topic_info_cycle != 0 && (now - _last_topic_info_cycle < 10'000'000)) {
-			return;
-		}
-
-		_last_topic_info_cycle = now;
-
-	} else if (now - _last_topic_info_send < 500) {
-		return;
-	}
-
-	px4_pblink_msgs_TopicInfo msg = px4_pblink_msgs_TopicInfo_init_default;
-	msg.timestamp = now;
-	msg.msg_type_id = UPLINK_MSG_TYPE_IDS[_topic_info_next_index];
-	pblink_copy_string(msg.msg_name, sizeof(msg.msg_name),
-			      UPLINK_TOPIC_NAMES[_topic_info_next_index],
-			      strlen(UPLINK_TOPIC_NAMES[_topic_info_next_index]) + 1);
-
-	uint8_t buffer[256];
-	pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
-
-	if (pb_encode(&stream, px4_pblink_msgs_TopicInfo_fields, &msg)) {
-		_send_proto_frame(ProtoMsgType::TOPIC_INFO, buffer, stream.bytes_written);
-	}
-
-	_last_topic_info_send = now;
-	_topic_info_next_index++;
-
-	if (_topic_info_next_index >= UPLINK_TOPICS_COUNT) {
-		_topic_info_next_index = 0;
 	}
 }
 

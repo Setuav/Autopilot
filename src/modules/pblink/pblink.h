@@ -149,14 +149,10 @@ private:
 	TopicStats _topic_stats[UPLINK_TOPICS_COUNT];
 
 	void _print_topic_stats();
-	void _send_topic_list();
 
 	px4_pollfd_struct_t _uplink_fds[UPLINK_POLL_TOPICS_COUNT] {};
 	PBLINK_DOWNLINK_PUBLICATIONS
 
 	uint8_t _tx_seq{0};
 	uint8_t _rx_seq{0};
-	size_t _topic_info_next_index{0};
-	hrt_abstime _last_topic_info_cycle{0};
-	hrt_abstime _last_topic_info_send{0};
 };

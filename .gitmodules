@@ -125,3 +125,7 @@
 [submodule "src/modules/pblink/pblink-proto"]
 	path = src/modules/pblink/pblink-proto
 	url = git@github.com:Setuav/pblink-proto.git
+[submodule "src/modules/pblink/nanopb"]
+	path = src/modules/pblink/nanopb
+	url = https://github.com/nanopb/nanopb.git
+

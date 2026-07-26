@@ -88,68 +88,32 @@ static bool pblink_parse_ip_arg(const char *arg, char *dst, size_t dst_size)
 
 int PBLink::print_status()
 {
-	PX4_INFO("PBLink running");
-	PX4_INFO("  Transport: %s", _transport == TransportMode::UDP ? "UDP" : "UART");
+	uint32_t active_count = 0;
+	for (size_t i = 0; i < UPLINK_TOPICS_COUNT; i++) {
+		if (_uplink_rate_limiters[i].get_interval() > 0) {
+			active_count++;
+		}
+	}
 
 #ifdef PBLINK_UDP_SUPPORTED
-	PX4_INFO("  Initialized: %s", (_uart_initialized || _udp_initialized) ? "yes" : "no");
-	if (_transport == TransportMode::UDP && _udp_initialized) {
-		PX4_INFO("  UDP peer: %s:%u (parameter)",
+	if (_transport == TransportMode::UDP) {
+		PX4_INFO("Transport: UDP (%s:%u) | Status: %s",
 			 inet_ntoa(_companion_addr.sin_addr),
-			 ntohs(_companion_addr.sin_port));
-	}
-#else
-	PX4_INFO("  Initialized: %s", _uart_initialized ? "yes" : "no");
-	PX4_INFO("  UDP support: NOT AVAILABLE (platform limitation)");
+			 ntohs(_companion_addr.sin_port),
+			 _udp_initialized ? "OK" : "ERROR");
+	} else
 #endif
-
-	float uptime_sec = (hrt_absolute_time() - _stats.start_time) / 1e6f;
-
-	PX4_INFO("  Uptime: %.1f sec", (double)uptime_sec);
-	PX4_INFO("");
-	PX4_INFO("  Statistics:");
-	PX4_INFO("    TX:");
-	PX4_INFO("      Rate:     %.1f B/s", (double)_stats.tx_rate_avg);
-	PX4_INFO("      Total:    %" PRIu64 " bytes (%" PRIu32 " messages)",
-	         _stats.tx_total_bytes, _stats.tx_message_count);
-	PX4_INFO("      Errors:   %" PRIu32, _stats.tx_error_count);
-	PX4_INFO("      CRC Errs: %" PRIu32, _stats.crc_error_count);
-	if (_stats.last_tx_errno != 0) {
-		PX4_INFO("      Last err: %d (%s)", _stats.last_tx_errno, strerror(_stats.last_tx_errno));
+	{
+		PX4_INFO("Transport: UART (%s @ %d baud) | Status: %s",
+		         _uart_device, _uart_baud, _uart_initialized ? "OK" : "ERROR");
 	}
 
-	if (_stats.tx_message_count > 0) {
-		PX4_INFO("      Avg size: %" PRIu64 " bytes/msg",
-		         _stats.tx_total_bytes / _stats.tx_message_count);
-	}
+	PX4_INFO("TX: %.1f kB/s (%" PRIu32 " msgs) | RX: %.1f kB/s (%" PRIu32 " msgs) | Errors: %" PRIu32,
+	         (double)(_stats.tx_rate_avg / 1024.0f), _stats.tx_message_count,
+	         (double)(_stats.rx_rate_avg / 1024.0f), _stats.rx_message_count,
+	         _stats.tx_error_count + _stats.rx_error_count + _stats.crc_error_count);
 
-	PX4_INFO("    RX:");
-	PX4_INFO("      Rate:     %.1f B/s", (double)_stats.rx_rate_avg);
-	PX4_INFO("      Total:    %" PRIu64 " bytes (%" PRIu32 " messages)",
-	         _stats.rx_total_bytes, _stats.rx_message_count);
-	PX4_INFO("      Errors:   %" PRIu32, _stats.rx_error_count);
-
-	if (_stats.rx_message_count > 0) {
-		PX4_INFO("      Avg size: %" PRIu64 " bytes/msg",
-		         _stats.rx_total_bytes / _stats.rx_message_count);
-	}
-
-	PX4_INFO("      Buffer:   %zu / %zu bytes", _rx_buffer_len, RX_BUFFER_SIZE);
-
-	uint32_t total_tx = _stats.tx_message_count + _stats.tx_error_count;
-	uint32_t total_rx = _stats.rx_message_count + _stats.rx_error_count;
-
-	if (total_tx > 0) {
-		float tx_error_rate = (100.0f * _stats.tx_error_count) / total_tx;
-		PX4_INFO("    TX error rate: %.2f%%", (double)tx_error_rate);
-	}
-
-	if (total_rx > 0) {
-		float rx_error_rate = (100.0f * _stats.rx_error_count) / total_rx;
-		PX4_INFO("    RX error rate: %.2f%%", (double)rx_error_rate);
-	}
-
-	_print_topic_stats();
+	PX4_INFO("Active Topics: %" PRIu32 " / %zu", active_count, UPLINK_TOPICS_COUNT);
 
 	return 0;
 }
@@ -704,6 +668,41 @@ void PBLink::_handle_received_frame(uint8_t msg_type, const uint8_t *payload, si
 			pb_ostream_t ostream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 			if (pb_encode(&ostream, px4_pblink_msgs_TopicListResponse_fields, &resp)) {
 				_send_proto_frame(ProtoMsgType::TOPIC_LIST_RESPONSE, buffer, ostream.bytes_written);
+			}
+		}
+
+		return;
+	}
+
+	if (msg_type == static_cast<uint8_t>(ProtoMsgType::LINK_STATUS_REQUEST)) {
+		px4_pblink_msgs_LinkStatusRequest proto_msg = px4_pblink_msgs_LinkStatusRequest_init_default;
+		pb_istream_t stream = pb_istream_from_buffer(payload, len);
+
+		if (pb_decode(&stream, px4_pblink_msgs_LinkStatusRequest_fields, &proto_msg)) {
+			px4_pblink_msgs_LinkStatusResponse resp = px4_pblink_msgs_LinkStatusResponse_init_default;
+			resp.timestamp = hrt_absolute_time();
+			resp.request_id = proto_msg.request_id;
+			resp.tx_bytes_sec = static_cast<uint32_t>(_stats.tx_rate_avg);
+			resp.rx_bytes_sec = static_cast<uint32_t>(_stats.rx_rate_avg);
+			resp.tx_total_bytes = _stats.tx_total_bytes;
+			resp.rx_total_bytes = _stats.rx_total_bytes;
+			resp.tx_message_count = _stats.tx_message_count;
+			resp.rx_message_count = _stats.rx_message_count;
+			resp.tx_error_count = _stats.tx_error_count;
+			resp.rx_error_count = _stats.rx_error_count;
+
+			uint32_t active_count = 0;
+			for (size_t i = 0; i < UPLINK_TOPICS_COUNT; i++) {
+				if (_uplink_rate_limiters[i].get_interval() > 0) {
+					active_count++;
+				}
+			}
+			resp.active_topic_count = active_count;
+
+			uint8_t buffer[128];
+			pb_ostream_t ostream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+			if (pb_encode(&ostream, px4_pblink_msgs_LinkStatusResponse_fields, &resp)) {
+				_send_proto_frame(ProtoMsgType::LINK_STATUS_RESPONSE, buffer, ostream.bytes_written);
 			}
 		}
 

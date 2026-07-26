@@ -122,3 +122,6 @@
 [submodule "src/modules/simulation/gz_plugins/optical_flow/PX4-OpticalFlow"]
 	path = src/modules/simulation/gz_plugins/optical_flow/PX4-OpticalFlow
 	url = https://github.com/PX4/PX4-OpticalFlow.git
+[submodule "src/modules/pblink/pblink-proto"]
+	path = src/modules/pblink/pblink-proto
+	url = git@github.com:Setuav/pblink-proto.git

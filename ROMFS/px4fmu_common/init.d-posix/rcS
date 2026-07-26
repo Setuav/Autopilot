@@ -183,6 +183,7 @@ param set-default COM_LOW_BAT_ACT 3
 
 # set default IP to localhost
 param set-default UXRCE_DDS_AG_IP 2130706433 # 127.0.0.1
+param set-default PBLINK_RMT_IP 2130706433    # 127.0.0.1
 
 
 # Adapt timeout parameters if simulation runs faster or slower than realtime.
@@ -333,6 +334,11 @@ uxrce_dds_client start -t udp -p $uxrce_dds_port $uxrce_dds_ns
 if param greater -s ZENOH_ENABLE 0
 then
 	zenoh start
+fi
+
+if param compare -s PBLINK_EN 1 && param compare -s PBLINK_CFG 1000
+then
+	pblink start -t udp -u p:PBLINK_PORT -h p:PBLINK_RMT_IP
 fi
 
 if param greater -s MNT_MODE_IN -1

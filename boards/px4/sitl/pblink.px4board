@@ -1,0 +1,2 @@
+# SITL with pblink module enabled
+CONFIG_MODULES_PBLINK=y

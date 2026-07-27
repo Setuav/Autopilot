@@ -55,12 +55,28 @@ def parse_msg_file(msg_path):
                 })
     return fields
 
-def find_msg_file(msg_dir, topic_name_pascal):
+def find_msg_file(msg_dir, topic_name_pascal, topic_dict, yaml_file_path):
     if not msg_dir or not os.path.exists(msg_dir):
         return None
-    candidate = os.path.join(msg_dir, f"{topic_name_pascal}.msg")
-    if os.path.exists(candidate):
-        return candidate
+
+    possible_paths = []
+    if 'msg_file' in topic_dict:
+        explicit = topic_dict['msg_file']
+        possible_paths.extend([
+            os.path.join(os.path.dirname(yaml_file_path), explicit),
+            os.path.join(os.path.dirname(yaml_file_path), "custom", explicit),
+            os.path.join(msg_dir, explicit),
+            os.path.join(msg_dir, "versioned", explicit)
+        ])
+
+    possible_paths.extend([
+        os.path.join(msg_dir, f"{topic_name_pascal}.msg"),
+        os.path.join(msg_dir, "versioned", f"{topic_name_pascal}.msg")
+    ])
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
     return None
 
 def write_generated(filepath, content):
@@ -102,13 +118,14 @@ def main():
         topic_name_snake = topic['name']
         topic_name_camel = snake_to_camel(topic_name_snake)
 
-        custom_proto = os.path.join(output_dir, f"{topic_name_snake}.proto")
+        custom_proto = os.path.join(os.path.dirname(args.yaml_file), "custom", f"{topic_name_snake}.proto")
         if topic.get('internal', False) and os.path.exists(custom_proto):
             print(f"Skipping custom RPC topic: {topic_name_snake}")
             continue
 
-        msg_file_path = find_msg_file(args.msg_dir, topic_name_camel)
+        msg_file_path = find_msg_file(args.msg_dir, topic_name_camel, topic, args.yaml_file)
         if not msg_file_path:
+            print(f"Warning: .msg file for '{topic_name_snake}' not found. Skipping.")
             continue
 
         fields = parse_msg_file(msg_file_path)

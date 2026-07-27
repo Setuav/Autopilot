@@ -3,13 +3,14 @@
 generate_cpp.py - PX4 Build Generator Script
 
 Executed during CMake build time (`make px4_sitl_pblink`).
-Reads topics.yaml and pre-existing .proto files, renders Jinja2 templates,
-and outputs C++ converters and header files.
+Reads topics.yaml and pre-existing .proto files from proto/custom/ and proto/generated/,
+renders Jinja2 templates, and outputs C++ converter headers/sources.
 """
 import os
 import argparse
 import re
 import yaml
+import shutil
 from jinja2 import Environment, FileSystemLoader
 
 def uorb_to_proto_type(uorb_type):
@@ -62,10 +63,15 @@ def find_msg_file(msg_dir, topic_name_pascal):
     candidate = os.path.join(msg_dir, f"{topic_name_pascal}.msg")
     if os.path.exists(candidate):
         return candidate
+    candidate_versioned = os.path.join(msg_dir, "versioned", f"{topic_name_pascal}.msg")
+    if os.path.exists(candidate_versioned):
+        return candidate_versioned
     return None
 
 def write_generated(filepath, content):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    if not content.endswith('\n'):
+        content += '\n'
     if os.path.exists(filepath):
         with open(filepath, 'r') as f:
             if f.read() == content:
@@ -73,23 +79,28 @@ def write_generated(filepath, content):
     with open(filepath, 'w') as f:
         f.write(content)
 
-def process_topic(topic, msg_dir, proto_template, package_name, proto_dir, yaml_file_path):
+def process_topic(topic, msg_dir, proto_dir, yaml_file_path):
     topic_name_snake = topic['name']
     topic_name_camel = snake_to_camel(topic_name_snake)
+    is_internal = topic.get('internal', False)
 
+    # Copy pre-existing .proto file from custom/ or generated/ to proto_dir for Nanopb
     custom_proto_path = os.path.join(os.path.dirname(yaml_file_path), "custom", f"{topic_name_snake}.proto")
     if not os.path.exists(custom_proto_path):
         custom_proto_path = os.path.join(os.path.dirname(yaml_file_path), "generated", f"{topic_name_snake}.proto")
 
     if os.path.exists(custom_proto_path):
-        import shutil
         proto_output_path = os.path.join(proto_dir, f"{topic_name_snake}.proto")
-        shutil.copyfile(custom_proto_path, proto_output_path)
+        if os.path.abspath(custom_proto_path) != os.path.abspath(proto_output_path):
+            shutil.copyfile(custom_proto_path, proto_output_path)
         custom_options_path = custom_proto_path.replace(".proto", ".options")
         if os.path.exists(custom_options_path):
             options_output_path = os.path.join(proto_dir, f"{topic_name_snake}.options")
-            shutil.copyfile(custom_options_path, options_output_path)
+            if os.path.abspath(custom_options_path) != os.path.abspath(options_output_path):
+                shutil.copyfile(custom_options_path, options_output_path)
 
+    # For internal RPC topics, no uORB msg parsing is needed
+    if is_internal:
         rate_hz = topic.get('rate_hz', 0)
         interval_us = int(1e6 / rate_hz) if rate_hz > 0 else 0
         return {
@@ -101,37 +112,37 @@ def process_topic(topic, msg_dir, proto_template, package_name, proto_dir, yaml_
             'rate_hz': rate_hz,
             'interval_us': interval_us,
             'description': topic.get('description', ''),
-            'internal': topic.get('internal', False)
+            'internal': True
         }
 
+    # For uORB topics, parse fields from .msg file for C++ converter generation
+    fields = []
     if 'msg_file' in topic:
         explicit_filename = topic['msg_file']
         possible_paths = [
             os.path.join(os.path.dirname(yaml_file_path), explicit_filename),
             os.path.join(os.path.dirname(yaml_file_path), "custom", explicit_filename),
-            os.path.join(msg_dir, explicit_filename),
-            os.path.join(msg_dir, "versioned", explicit_filename)
+            os.path.join(msg_dir, explicit_filename) if msg_dir else "",
+            os.path.join(msg_dir, "versioned", explicit_filename) if msg_dir else ""
         ]
 
         msg_file_path = None
         for path in possible_paths:
-            if os.path.exists(path):
+            if path and os.path.exists(path):
                 msg_file_path = path
                 break
 
-        if not msg_file_path:
-            return None
+        if msg_file_path:
+            fields = parse_msg_file(msg_file_path)
     else:
         msg_file_path = find_msg_file(msg_dir, topic_name_camel)
-        if not msg_file_path:
-            return None
-
-    fields = parse_msg_file(msg_file_path)
+        if msg_file_path:
+            fields = parse_msg_file(msg_file_path)
 
     rate_hz = topic.get('rate_hz', 0)
     interval_us = int(1e6 / rate_hz) if rate_hz > 0 else 0
 
-    topic_data = {
+    return {
         'name': topic_name_snake,
         'name_pascal': topic_name_camel,
         'name_upper': topic_name_snake.upper(),
@@ -140,18 +151,8 @@ def process_topic(topic, msg_dir, proto_template, package_name, proto_dir, yaml_
         'rate_hz': rate_hz,
         'interval_us': interval_us,
         'description': topic.get('description', ''),
-        'internal': topic.get('internal', False)
+        'internal': False
     }
-
-    proto_output_path = os.path.join(proto_dir, f"{topic_name_snake}.proto")
-    proto_content = proto_template.render(
-        package_name=package_name,
-        message_name=topic_name_camel,
-        fields=fields
-    )
-    write_generated(proto_output_path, proto_content)
-
-    return topic_data
 
 def main():
     parser = argparse.ArgumentParser(description="PX4 Build Tool: Generate C++ converter files from Protobuf and uORB schemas.")
@@ -160,66 +161,124 @@ def main():
     parser.add_argument('-t', '--template-dir', help="Jinja2 templates directory")
     parser.add_argument('-p', '--proto-dir', help="Output directory for .proto files")
     parser.add_argument('-g', '--generated-dir', help="Output directory for C++ converter files")
+    parser.add_argument('--list-topics', action='store_true', help="Print topic names from the YAML config and exit")
 
     args = parser.parse_args()
 
     with open(args.yaml_file, 'r') as f:
         config = yaml.safe_load(f)
 
-    package_name = config.get('package', 'px4_pblink.msgs')
-    topics = config.get('topics', [])
+    if args.list_topics:
+        topic_names = [t['name'] for t in config.get('topics', []) if 'name' in t]
+        print(";".join(topic_names))
+        return
 
-    env = Environment(loader=FileSystemLoader(args.template_dir))
+    env = Environment(
+        loader=FileSystemLoader(args.template_dir),
+        trim_blocks=True,
+        lstrip_blocks=True
+    )
     env.filters['uorb_to_proto_type'] = uorb_to_proto_type
-    proto_template = env.get_template('topic.proto.j2')
+    env.filters['capitalize'] = snake_to_camel
+
+    converter_h_template = env.get_template('converter_h.j2')
+    converter_cpp_template = env.get_template('converter_cpp.j2')
+    topics_header_template = env.get_template('topics_header.j2')
+    downlink_handlers_template = env.get_template('downlink_handlers.j2')
+    uplink_senders_template = env.get_template('uplink_senders.j2')
+
+    package_name = config.get('package', 'px4_pblink.msgs')
 
     uplink_topics = []
     downlink_topics = []
-    unique_topics = []
-    seen_ids = set()
+    bidirectional_topics = []
 
-    for topic in topics:
-        topic_data = process_topic(topic, args.msg_dir, proto_template, package_name, args.proto_dir, args.yaml_file)
-        if topic_data:
-            direction = topic.get('direction', 'uplink')
-            if direction == 'uplink':
-                uplink_topics.append(topic_data)
-            elif direction == 'downlink':
-                downlink_topics.append(topic_data)
-            elif direction == 'both':
-                topic_data_uplink = topic_data.copy()
-                topic_data_uplink['rate_hz'] = topic.get('uplink_rate_hz', 10)
-                topic_data_uplink['interval_us'] = int(1e6 / topic_data_uplink['rate_hz']) if topic_data_uplink['rate_hz'] > 0 else 0
-                uplink_topics.append(topic_data_uplink)
+    for topic in config.get('topics', []):
+        direction = topic.get('direction', 'uplink')
 
-                topic_data_downlink = topic_data.copy()
-                topic_data_downlink['rate_hz'] = topic.get('downlink_rate_hz', 0)
-                topic_data_downlink['interval_us'] = int(1e6 / topic_data_downlink['rate_hz']) if topic_data_downlink['rate_hz'] > 0 else 0
-                downlink_topics.append(topic_data_downlink)
+        topic_data = process_topic(topic, args.msg_dir, args.proto_dir, args.yaml_file)
+        if not topic_data:
+            continue
 
-            msg_id = topic_data['msg_type_id']
-            if msg_id not in seen_ids:
-                unique_topics.append(topic_data)
-                seen_ids.add(msg_id)
+        topic_data['direction'] = direction
 
-    # Render C++ Converter Headers and Impl
-    template_files = [
-        ('uorb_to_proto.h.j2', 'uorb_to_proto.h'),
-        ('uorb_to_proto.cpp.j2', 'uorb_to_proto.cpp'),
-        ('pblink_topics.h.j2', 'pblink_topics.h'),
-        ('pblink_downlink.h.j2', 'pblink_downlink.h')
-    ]
+        if direction == 'uplink':
+            uplink_topics.append(topic_data)
+        elif direction == 'downlink':
+            downlink_topics.append(topic_data)
+        elif direction == 'both':
+            uplink_copy = topic_data.copy()
+            downlink_copy = topic_data.copy()
 
-    for tmpl_name, out_name in template_files:
-        tmpl = env.get_template(tmpl_name)
-        content = tmpl.render(
+            uplink_copy['direction'] = 'uplink'
+            downlink_copy['direction'] = 'downlink'
+
+            if 'uplink_rate_hz' in topic:
+                uplink_rate = topic['uplink_rate_hz']
+                uplink_copy['rate_hz'] = uplink_rate
+                uplink_copy['interval_us'] = int(1e6 / uplink_rate) if uplink_rate > 0 else 0
+
+            if 'downlink_rate_hz' in topic:
+                downlink_rate = topic['downlink_rate_hz']
+                downlink_copy['rate_hz'] = downlink_rate
+                downlink_copy['interval_us'] = int(1e6 / downlink_rate) if downlink_rate > 0 else 0
+
+            uplink_topics.append(uplink_copy)
+            downlink_topics.append(downlink_copy)
+            bidirectional_topics.append(topic_data)
+
+    all_topics = uplink_topics + downlink_topics
+
+    if all_topics:
+        h_content = converter_h_template.render(
+            package_name=package_name,
+            topics=all_topics,
+            uplink_topics=uplink_topics,
+            downlink_topics=downlink_topics
+        )
+        h_output_path = os.path.join(args.generated_dir, "uorb_to_proto.h")
+        write_generated(h_output_path, h_content)
+
+        cpp_content = converter_cpp_template.render(
+            package_name=package_name,
+            topics=all_topics,
+            uplink_topics=uplink_topics,
+            downlink_topics=downlink_topics
+        )
+        cpp_output_path = os.path.join(args.generated_dir, "uorb_to_proto.cpp")
+        write_generated(cpp_output_path, cpp_content)
+
+        unique_topics = []
+        seen_ids = set()
+        for topic in all_topics:
+            if topic['msg_type_id'] not in seen_ids:
+                unique_topics.append(topic)
+                seen_ids.add(topic['msg_type_id'])
+
+        topics_h_content = topics_header_template.render(
+            package_name=package_name,
             uplink_topics=uplink_topics,
             downlink_topics=downlink_topics,
-            unique_topics=unique_topics,
-            package_name=package_name
+            unique_topics=unique_topics
         )
-        write_generated(os.path.join(args.generated_dir, out_name), content)
-        print(f"Generated {out_name}")
+        topics_h_output_path = os.path.join(args.generated_dir, "pblink_topics.h")
+        write_generated(topics_h_output_path, topics_h_content)
+
+        downlink_h_content = downlink_handlers_template.render(
+            package_name=package_name,
+            downlink_topics=downlink_topics
+        )
+        downlink_h_output_path = os.path.join(args.generated_dir, "pblink_downlink.h")
+        write_generated(downlink_h_output_path, downlink_h_content)
+
+        uplink_h_content = uplink_senders_template.render(
+            package_name=package_name,
+            uplink_topics=uplink_topics
+        )
+        uplink_h_output_path = os.path.join(args.generated_dir, "pblink_uplink.h")
+        write_generated(uplink_h_output_path, uplink_h_content)
+
+    print(f"Generated C++ converter files for {len(uplink_topics)} uplink topics and {len(downlink_topics)} downlink topics.")
 
 if __name__ == '__main__':
     main()

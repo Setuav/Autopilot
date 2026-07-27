@@ -429,6 +429,9 @@ void PBLink::_process_incoming_data()
 		socklen_t addr_len = sizeof(sender_addr);
 		nread = recvfrom(_udp_fd, temp_buf, sizeof(temp_buf), 0,
 				 (struct sockaddr *)&sender_addr, &addr_len);
+		if (nread > 0) {
+			_companion_addr = sender_addr;
+		}
 	} else
 #endif
 	if (_transport == TransportMode::UART && _uart_initialized) {
